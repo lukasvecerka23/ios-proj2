@@ -6,7 +6,7 @@
 #include <stdlib.h>
 
 int init(){
-
+    return 0;
 }
 
 void clean_everything(){
@@ -34,5 +34,10 @@ void hydrogen_generator(){
 }
 
 int main(int argc, char **argv){
-
+    if (argc > 0){
+        for (int i = 1; i < argc; i++){
+            printf("%s", argv[i]);
+        }
+    }
+    return 0;
 }
