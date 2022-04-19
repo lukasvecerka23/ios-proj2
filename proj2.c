@@ -13,6 +13,11 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
+#include <sys/types.h>
+#include <sys/sem.h>
+#include <sys/ipc.h>
+#include <time.h>
 
 
 #define MMAP(pointer) {(pointer) = mmap(NULL, sizeof(*(pointer)), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);}
@@ -20,6 +25,8 @@
 FILE *file;
 
 // Semaphores
+sem_t *mutex = NULL;
+sem_t *barrier = NULL;
 sem_t *sem_oxygen = NULL;
 sem_t *sem_hydrogen = NULL;
 sem_t *sem_molecule = NULL;
@@ -30,21 +37,26 @@ sem_t *sem_message = NULL;
 int *action_id = NULL;
 int *molecule_cnt = NULL;
 int *oxygen_cnt = NULL;
+int *oxygens = NULL;
+int *hydrogens = NULL;
 int *hydrogen_cnt = NULL;
-bool *molecule_created = NULL;
-bool *end = NULL;
+int *created = NULL;
 
-int init(){
+
+bool init(){
     MMAP(molecule_cnt);
     MMAP(oxygen_cnt);
     MMAP(hydrogen_cnt);
-    MMAP(molecule_created);
-    MMAP(end);
     MMAP(action_id);
+    MMAP(created);
+    MMAP(oxygens);
+    MMAP(hydrogens);
     if ((sem_oxygen = sem_open("/xvecer30.semaphore1", O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED) return false;
     if ((sem_hydrogen = sem_open("/xvecer30.semaphore2", O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED) return false;
     if ((sem_molecule = sem_open("/xvecer30.semaphore3", O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED) return false;
-    if ((sem_message = sem_open("/xvecer30.semaphore4", O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED) return false;
+    if ((sem_message = sem_open("/xvecer30.semaphore4", O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED) return false;
+    if ((mutex = sem_open("/xvecer30.semaphore5", O_CREAT | O_EXCL, 0666, 1)) == SEM_FAILED) return false;
+    if ((barrier = sem_open("/xvecer30.semaphore6", O_CREAT | O_EXCL, 0666, 0)) == SEM_FAILED) return false;
     return true;
 }
 
@@ -52,68 +64,184 @@ void clean_everything(){
     UNMAP(molecule_cnt);
     UNMAP(oxygen_cnt);
     UNMAP(hydrogen_cnt);
-    UNMAP(molecule_created);
-    UNMAP(end);
     UNMAP(action_id);
+    UNMAP(created);
+    UNMAP(oxygens);
+    UNMAP(hydrogens);
     sem_close(sem_oxygen);
     sem_close(sem_hydrogen);
     sem_close(sem_molecule);
     sem_close(sem_message);
+    sem_close(mutex);
+    sem_close(barrier);
     sem_unlink("/xvecer30.semaphore1");
     sem_unlink("/xvecer30.semaphore2");
     sem_unlink("/xvecer30.semaphore3");
     sem_unlink("/xvecer30.semaphore4");
+    sem_unlink("/xvecer30.semaphore5");
+    sem_unlink("/xvecer30.semaphore6");
 }
 
-void process_oxygen(long TI, int oxygen_id, long TB){
-    (void)TI;
-    (void)TB;
+void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
+    (void)NH;
+    (void)NO;
+    // Oxygen started
     sem_wait(sem_message);
-    fprintf(file, "%d: H %d: started", ++(*action_id), oxygen_id);
+    fprintf(file, "%d: O %d: started\n", ++(*action_id), oxygen_id);
     fflush(file);
     sem_post(sem_message);
-    usleep(rand()%TI);
+
+    // Oxygen going to queue
+    srand(time(0)+getpid());
+    usleep((rand()%(TI+1))*1000);
+    sem_wait(sem_message);
+    fprintf(file, "%d: O %d: going to queue\n", ++(*action_id), oxygen_id);
+    fflush(file);
+    sem_post(sem_message);
+
+    sem_wait(mutex);
+    printf("Mutex: Molecule cnt: %d, oxygen id: %d\n", *molecule_cnt,oxygen_id);
+    (*oxygen_cnt)++;
+    (*oxygens)++;   
+    if (*hydrogen_cnt >= 2){
+        sem_post(sem_hydrogen);
+        sem_post(sem_hydrogen);
+        (*hydrogen_cnt)-=2;
+        sem_post(sem_oxygen);
+        (*oxygen_cnt)--;
+    } else {
+        sem_post(mutex);
+    }
+
+    if (*oxygens*2 <= NH){
+        printf("OxyQueue: Molecule cnt: %d, oxygen id: %d\n", *molecule_cnt,oxygen_id);
+        sem_wait(sem_oxygen);
+    } else {
+        sem_wait(sem_message);
+        fprintf(file, "%d: O %d: not enough H\n", ++(*action_id), oxygen_id);
+        fflush(file);
+        sem_post(sem_message);
+        exit(0);
+    }
+
+    sem_wait(sem_message);
+    fprintf(file, "%d: O %d: creating molecule %d\n", ++(*action_id), oxygen_id, *molecule_cnt);
+    fflush(file);
+    sem_post(sem_message);
+
+    sem_wait(barrier);
+    usleep((rand()%(TB+1))*1000);
+    sem_post(sem_molecule);
+    sem_post(sem_molecule);
+
+    sem_wait(sem_message);
+    fprintf(file, "%d: O %d: molecule %d created\n", ++(*action_id), oxygen_id, *molecule_cnt);
+    fflush(file);
+    sem_post(sem_message);
+
+    sem_wait(barrier);
+    (*molecule_cnt)++;
+    sem_post(mutex);
+
     exit(0);
 }
 
-void process_hydrogen(long TI, int hydrogen_id){
-    (void)TI;
+void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
+    (void)NH;
+    (void)NO;
+    // Hydrogen started
     sem_wait(sem_message);
-    fprintf(file, "%d: O %d: started", ++(*action_id), hydrogen_id);
+    fprintf(file, "%d: H %d: started\n", ++(*action_id), hydrogen_id);
     fflush(file);
     sem_post(sem_message);
-    usleep(rand()%TI);
+
+    // Hydrogen going to queue
+    srand(time(0)+getpid());
+    usleep((rand()%(TI+1))*1000);
+    sem_wait(sem_message);
+    fprintf(file, "%d: H %d: going to queue\n", ++(*action_id), hydrogen_id);
+    fflush(file);
+    sem_post(sem_message);
+
+    sem_wait(mutex);
+    printf("Mutex: Molecule cnt: %d, hydrogen id: %d\n", *molecule_cnt,hydrogen_id);
+    (*hydrogen_cnt)++;
+    (*hydrogens)++;
+    if (*hydrogen_cnt >= 2 && *oxygen_cnt >= 1){
+        sem_post(sem_hydrogen);
+        sem_post(sem_hydrogen);
+        (*hydrogen_cnt)-=2;
+        sem_post(sem_oxygen);
+        (*oxygen_cnt)--;
+    } else {
+        sem_post(mutex);
+    }
+
+    if (*oxygens == NO || *hydrogens == NH){
+        if ((NH/2) <= NO && NO*2 <= NH){
+            printf("HydroQueue: Molecule cnt: %d, hydrogen id: %d\n", *molecule_cnt,hydrogen_id);
+            printf("HydroQueue: oxygens: %d, hydrogens: %d\n", *oxygens,*hydrogens);
+            sem_wait(sem_hydrogen);
+        } else {
+            sem_wait(sem_message);
+            fprintf(file, "%d: H %d: not enough O or H\n", ++(*action_id), hydrogen_id);
+            printf("NotEnough: oxygens: %d, hydrogens: %d\n", *oxygens,*hydrogens);
+            fflush(file);
+            sem_post(sem_message);
+            exit(0);
+        }
+    } else {sem_wait(sem_hydrogen);}
+
+
+    sem_wait(sem_message);
+    fprintf(file, "%d: H %d: creating molecule %d\n", ++(*action_id), hydrogen_id, *molecule_cnt);
+    fflush(file);
+    sem_post(sem_message);
+    (*created)++;
+    if (*created == 2){
+        sem_post(barrier);
+    }
+
+    sem_wait(sem_molecule);
+    sem_wait(sem_message);
+    fprintf(file, "%d: H %d: molecule %d created\n", ++(*action_id), hydrogen_id, *molecule_cnt);
+    fflush(file);
+    sem_post(sem_message);
+    (*created)--;
+    if (*created == 0){
+        sem_post(barrier);
+    }
+
     exit(0);
 }
 
-void oxygen_generator(long NO, long TI, long TB){
+void oxygen_generator(long NO, long TI, long TB, long NH){
     pid_t oxygen;
     for (int i = 0; i < NO; i++){
         oxygen = fork();
         if (oxygen == 0){
-            process_oxygen(TI, i+1, TB);
-            
+            process_oxygen(TI, i+1, TB, NH, NO);
+            exit(0);          
         } else if (oxygen < 0){
             fprintf(stderr, "Fork failed\n");
             exit(1);
         }
     }
-    exit(0);
 }
 
-void hydrogen_generator(long NH, long TI){
+void hydrogen_generator(long NH, long TI, long NO){
     pid_t hydrogen;
     for (int i = 0; i < NH; i++){
         hydrogen = fork();
         if (hydrogen == 0){
-            process_hydrogen(TI, i+1);
-            
+            process_hydrogen(TI, i+1, NH, NO);
+            exit(0);
         } else if (hydrogen < 0){
             fprintf(stderr, "Fork failed\n");
             exit(1);
         }
     }
-    exit(0);
+    
 }
 
 int main(int argc, char **argv){
@@ -158,24 +286,25 @@ int main(int argc, char **argv){
         return 1;
     }
     (*action_id) = 0;
-    (*molecule_cnt) = 0;
+    (*molecule_cnt) = 1;
     (*oxygen_cnt) = 0;
     (*hydrogen_cnt) = 0;
-    (*molecule_created) = false;
-    (*end) = false;
-    pid_t start = fork();
-    if (start == 0){
-        oxygen_generator(NO, TI, TB);
-    } else if (start > 0){
-        hydrogen_generator(NH, TI);
+    (*created) = 0;
+    (*oxygens) = 0;
+    (*hydrogens) = 0;
+
+    pid_t mainproc = fork();
+    if (mainproc == 0){
+        oxygen_generator(NO, TI, TB, NH);
+    } else if (mainproc > 0){
+        hydrogen_generator(NH, TI, NO);
     } 
-    else if (start < 0){
+    else if (mainproc < 0){
         fprintf(stderr, "Fork failed\n");
         return 1;
     }
 
     clean_everything();
     fclose(file);
-    exit(0);
     return 0;
 }
