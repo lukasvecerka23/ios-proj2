@@ -42,7 +42,7 @@ int *hydrogens = NULL;
 int *hydrogen_cnt = NULL;
 int *created = NULL;
 
-
+// initialization of semaphores and shared variables
 bool init(){
     MMAP(molecule_cnt);
     MMAP(oxygen_cnt);
@@ -60,6 +60,7 @@ bool init(){
     return true;
 }
 
+// cleaning all semaphores and shared variables
 void clean_everything(){
     UNMAP(molecule_cnt);
     UNMAP(oxygen_cnt);
@@ -100,7 +101,6 @@ void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
     sem_post(sem_message);
 
     sem_wait(mutex);
-    printf("Mutex: Molecule cnt: %d, oxygen id: %d\n", *molecule_cnt,oxygen_id);
     (*oxygen_cnt)++;
     (*oxygens)++;   
     if (*hydrogen_cnt >= 2){
@@ -114,7 +114,6 @@ void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
     }
 
     if (*oxygens*2 <= NH){
-        printf("OxyQueue: Molecule cnt: %d, oxygen id: %d\n", *molecule_cnt,oxygen_id);
         sem_wait(sem_oxygen);
     } else {
         sem_wait(sem_message);
@@ -124,11 +123,14 @@ void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
         exit(0);
     }
 
+    // start molecule creation
     sem_wait(sem_message);
     fprintf(file, "%d: O %d: creating molecule %d\n", ++(*action_id), oxygen_id, *molecule_cnt);
     fflush(file);
     sem_post(sem_message);
 
+    // wait for hydrogens and then wait to molecule creation
+    // after wait it gives signal to both hydrogens
     sem_wait(barrier);
     usleep((rand()%(TB+1))*1000);
     sem_post(sem_molecule);
@@ -139,6 +141,8 @@ void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
     fflush(file);
     sem_post(sem_message);
 
+    // wait for hydrogens to finish the molecule creation
+    // free the molecule creation queue
     sem_wait(barrier);
     (*molecule_cnt)++;
     sem_post(mutex);
@@ -164,7 +168,6 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
     sem_post(sem_message);
 
     sem_wait(mutex);
-    printf("Mutex: Molecule cnt: %d, hydrogen id: %d\n", *molecule_cnt,hydrogen_id);
     (*hydrogen_cnt)++;
     (*hydrogens)++;
     if (*hydrogen_cnt >= 2 && *oxygen_cnt >= 1){
@@ -177,9 +180,8 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
         sem_post(mutex);
     }
 
+    // Check if there are enough of Oxygen and Hydrogen if yes go to queue
     if (*hydrogens <= NO*2 && (*hydrogens%2 == 0 || *hydrogens+1 <= NH)){
-            printf("HydroQueue: Molecule cnt: %d, hydrogen id: %d\n", *molecule_cnt,hydrogen_id);
-            printf("HydroQueue: oxygens: %d, hydrogens: %d\n", *oxygens,*hydrogens);
             sem_wait(sem_hydrogen);
     } else {
             sem_wait(sem_message);
@@ -195,16 +197,21 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
     fprintf(file, "%d: H %d: creating molecule %d\n", ++(*action_id), hydrogen_id, *molecule_cnt);
     fflush(file);
     sem_post(sem_message);
+
+    // if both hydrogen are ready for creation send signal to oxygen
     (*created)++;
     if (*created == 2){
         sem_post(barrier);
     }
 
+    // waiting for molecule creatin
     sem_wait(sem_molecule);
     sem_wait(sem_message);
     fprintf(file, "%d: H %d: molecule %d created\n", ++(*action_id), hydrogen_id, *molecule_cnt);
     fflush(file);
     sem_post(sem_message);
+
+    // if queue for molecue creation is finished give signal to oxygen to free the molecule creation
     (*created)--;
     if (*created == 0){
         sem_post(barrier);
@@ -215,6 +222,7 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
 
 void oxygen_generator(long NO, long TI, long TB, long NH){
     pid_t oxygen;
+    // creation of oxygen processes
     for (int i = 0; i < NO; i++){
         oxygen = fork();
         if (oxygen == 0){
@@ -229,6 +237,7 @@ void oxygen_generator(long NO, long TI, long TB, long NH){
 
 void hydrogen_generator(long NH, long TI, long NO){
     pid_t hydrogen;
+    // creation of hydrogen processes
     for (int i = 0; i < NH; i++){
         hydrogen = fork();
         if (hydrogen == 0){
@@ -283,6 +292,7 @@ int main(int argc, char **argv){
         fprintf(stderr, "Problem with semaphore initialization\n");
         return 1;
     }
+    // set shared variables
     (*action_id) = 0;
     (*molecule_cnt) = 1;
     (*oxygen_cnt) = 0;
@@ -291,6 +301,7 @@ int main(int argc, char **argv){
     (*oxygens) = 0;
     (*hydrogens) = 0;
 
+    // creation of main process
     pid_t mainproc = fork();
     if (mainproc == 0){
         oxygen_generator(NO, TI, TB, NH);
