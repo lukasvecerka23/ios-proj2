@@ -177,12 +177,11 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
         sem_post(mutex);
     }
 
-    if (*oxygens == NO || *hydrogens == NH){
-        if ((NH/2) <= NO && NO*2 <= NH){
+    if (*hydrogens <= NO*2 && (*hydrogens%2 == 0 || *hydrogens+1 <= NH)){
             printf("HydroQueue: Molecule cnt: %d, hydrogen id: %d\n", *molecule_cnt,hydrogen_id);
             printf("HydroQueue: oxygens: %d, hydrogens: %d\n", *oxygens,*hydrogens);
             sem_wait(sem_hydrogen);
-        } else {
+    } else {
             sem_wait(sem_message);
             fprintf(file, "%d: H %d: not enough O or H\n", ++(*action_id), hydrogen_id);
             printf("NotEnough: oxygens: %d, hydrogens: %d\n", *oxygens,*hydrogens);
@@ -190,7 +189,6 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
             sem_post(sem_message);
             exit(0);
         }
-    } else {sem_wait(sem_hydrogen);}
 
 
     sem_wait(sem_message);
