@@ -84,8 +84,6 @@ void clean_everything(){
 }
 
 void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
-    (void)NH;
-    (void)NO;
     // Oxygen started
     sem_wait(sem_message);
     fprintf(file, "%d: O %d: started\n", ++(*action_id), oxygen_id);
@@ -186,7 +184,6 @@ void process_hydrogen(long TI, int hydrogen_id, long NH, long NO){
     } else {
             sem_wait(sem_message);
             fprintf(file, "%d: H %d: not enough O or H\n", ++(*action_id), hydrogen_id);
-            printf("NotEnough: oxygens: %d, hydrogens: %d\n", *oxygens,*hydrogens);
             fflush(file);
             sem_post(sem_message);
             exit(0);
