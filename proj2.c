@@ -83,7 +83,7 @@ void clean_everything(){
     sem_unlink("/xvecer30.semaphore6");
 }
 
-void process_oxygen(long TI, int oxygen_id, long TB, long NH, long NO){
+void process_oxygen(long TI, int oxygen_id, long TB, long NH){
     // Oxygen started
     sem_wait(sem_message);
     fprintf(file, "%d: O %d: started\n", ++(*action_id), oxygen_id);
@@ -223,7 +223,7 @@ void oxygen_generator(long NO, long TI, long TB, long NH){
     for (int i = 0; i < NO; i++){
         oxygen = fork();
         if (oxygen == 0){
-            process_oxygen(TI, i+1, TB, NH, NO);
+            process_oxygen(TI, i+1, TB, NH);
             exit(0);          
         } else if (oxygen < 0){
             fprintf(stderr, "Fork failed\n");
@@ -256,6 +256,12 @@ int main(int argc, char **argv){
         fprintf(stderr, "Wrong number of arguments! Usage: ./proj2 NO NH TI TB\n");
         return 1;
     }
+    for (int i=1;i<5; i++){
+        if (argv[i][0] == '\0'){
+            fprintf(stderr, "Missing parametr %s\n", argv[i]);
+            return 1;
+        }
+    }
     long NO = strtol(argv[1],&ptr, 10);
     if (NO < 0 || *ptr != '\0'){
         fprintf(stderr, "NO must be positive number\n");
@@ -274,6 +280,10 @@ int main(int argc, char **argv){
     long TB = strtol(argv[4],&ptr, 10);
     if (TB < 0 || TB > 1000 || *ptr != '\0'){
         fprintf(stderr, "TB must be positive number and from interval 0-1000\n");
+        return 1;
+    }
+    if (NO == 0 && NH == 0){
+        fprintf(stderr, "Oxygens and hydrgens are not set.\n");
         return 1;
     }
 
@@ -299,6 +309,7 @@ int main(int argc, char **argv){
     (*hydrogens) = 0;
 
     // creation of main process
+    /*
     pid_t mainproc = fork();
     if (mainproc == 0){
         oxygen_generator(NO, TI, TB, NH);
@@ -308,7 +319,11 @@ int main(int argc, char **argv){
     else if (mainproc < 0){
         fprintf(stderr, "Fork failed\n");
         return 1;
-    }
+    }*/
+
+
+    oxygen_generator(NO, TI, TB, NH);
+    hydrogen_generator(NH, TI, NO);
 
     clean_everything();
     fclose(file);
